@@ -104,6 +104,23 @@ esp_err_t sgp41_init(sgp41_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr,
 	/**/
 	me->i2c_dev = &i2c_bus->devs.dev[i2c_bus->devs.num - 1]; /* todo: write function to get the dev from name */
 
+	/* Execute selff test */
+	ESP_LOGI(TAG, "Executing self test...");
+	uint16_t test_result;
+	sgp41_execute_self_test(me, &test_result);
+
+	if (test_result != 0xD400) {
+		ESP_LOGE(TAG, "Self test failed with error: 0x%X", test_result);
+	}
+	else {
+		ESP_LOGI(TAG, "Self test executed successfully");
+	}
+
+	/* Get and print serial number */
+	sgp41_get_serial_number(me, me->serial_number);
+	ESP_LOGI(TAG, "Serial number: 0X%04X%04X%04X\n", me->serial_number[0],
+			me->serial_number[1], me->serial_number[2]);
+
 	/* Print successful initialization message */
 	ESP_LOGI(TAG, "Instance initialized successfully");
 

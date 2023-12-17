@@ -61,7 +61,7 @@ extern "C" {
 /* Exported typedef ----------------------------------------------------------*/
 typedef struct {
 	i2c_bus_dev_t *i2c_dev;
-	uint16_t id;
+	uint16_t serial_number[3];
 } sgp41_t;
 
 /* Exported variables --------------------------------------------------------*/
