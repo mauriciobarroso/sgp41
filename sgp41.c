@@ -41,6 +41,9 @@
 
 /* Private macros ------------------------------------------------------------*/
 #define NOP() asm volatile ("nop")
+#define CRC8_POLYNOMIAL 0x31
+#define CRC8_INIT 0xFF
+#define CRC8_LEN 1
 
 /* External variables --------------------------------------------------------*/
 
@@ -80,6 +83,16 @@ static int8_t i2c_write(uint16_t reg_addr, const uint8_t *reg_data,
  * @param period_us: Time in us to delay
  */
 static void delay_us(uint32_t period_us);
+
+/**
+ * @brief Function that generates a CRC byte for a given data
+ *
+ * @param data  :
+ * @param count :
+ *
+ * @return CRC byte
+ */
+static uint8_t generate_crc(const uint8_t *data, uint16_t count);
 
 /* Exported functions definitions --------------------------------------------*/
 /**
@@ -141,10 +154,14 @@ esp_err_t sgp41_execute_conditioning(sgp41_t *const me, uint16_t default_rh,
 	esp_err_t ret = ESP_OK;
 
 	/* Conditioning and get signal raw VOC */
-	uint8_t data_tx[4] = {(uint8_t)((default_rh >> 8) & 0xFF), (uint8_t)(default_rh & 0xFF),
-			                  (uint8_t)((default_t >> 8) & 0xFF), (uint8_t)(default_t & 0xFF)};
+	uint8_t data_tx[6] = {(uint8_t)((default_rh >> 8) & 0xFF),
+			(uint8_t)(default_rh & 0xFF),
+			generate_crc(&data_tx[0], 2),
+			(uint8_t)((default_t >> 8) & 0xFF),
+			(uint8_t)(default_t & 0xFF),
+			generate_crc(&data_tx[3], 2)};
 
-	if (i2c_write(SPG41_EXECUTE_CONDITIONING_CMD, data_tx, 4, me->i2c_dev) < 0) {
+	if (i2c_write(SPG41_EXECUTE_CONDITIONING_CMD, data_tx, 6, me->i2c_dev) < 0) {
 		return ESP_FAIL;
 	}
 
@@ -174,11 +191,15 @@ esp_err_t sgp41_measure_raw_signals(sgp41_t *const me, uint16_t relative_humidit
 	/* Variable to return error code */
 	esp_err_t ret = ESP_OK;
 
-	/* Get VOC and nOX raw signals */
-	uint8_t data_tx[4] = {(uint8_t)((relative_humidity >> 8) & 0xFF), (uint8_t)(relative_humidity & 0xFF),
-			                  (uint8_t)((temperature >> 8) & 0xFF), (uint8_t)(temperature & 0xFF)};
+	/* Get VOC and NOx raw signals */
+	uint8_t data_tx[6] = {(uint8_t)((relative_humidity >> 8) & 0xFF),
+			(uint8_t)(relative_humidity & 0xFF),
+			generate_crc(&data_tx[0], 2),
+			(uint8_t)((temperature >> 8) & 0xFF),
+			(uint8_t)(temperature & 0xFF),
+			generate_crc(&data_tx[3], 2)};
 
-	if (i2c_write(SPG41_MESASURE_RAW_SIGNALS_CMD, data_tx, 4, me->i2c_dev) < 0) {
+	if (i2c_write(SPG41_MESASURE_RAW_SIGNALS_CMD, data_tx, 6, me->i2c_dev) < 0) {
 		return ESP_FAIL;
 	}
 
@@ -325,6 +346,30 @@ static void delay_us(uint32_t period_us) {
   		NOP();
   	}
   }
+}
+
+/**
+ * @brief Function that generates a CRC byte for a given data
+ */
+static uint8_t generate_crc(const uint8_t *data, uint16_t count) {
+  uint16_t current_byte;
+  uint8_t crc = CRC8_INIT;
+  uint8_t crc_bit;
+
+  /* calculates 8-Bit checksum with given polynomial */
+  for (current_byte = 0; current_byte < count; ++current_byte) {
+  	crc ^= (data[current_byte]);
+
+  	for (crc_bit = 8; crc_bit > 0; --crc_bit) {
+  		if (crc & 0x80) {
+  			crc = (crc << 1) ^ CRC8_POLYNOMIAL;
+  		}
+  		else {
+  			crc = (crc << 1);
+  		}
+  	}
+  }
+  return crc;
 }
 
 /***************************** END OF FILE ************************************/
