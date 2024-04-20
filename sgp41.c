@@ -94,28 +94,39 @@ static void delay_us(uint32_t period_us);
  */
 static uint8_t generate_crc(const uint8_t *data, uint16_t count);
 
+/**
+ * @brief Function that checks the CRC for the received data
+ *
+ * @param data     :
+ * @param count    :
+ * @param checksum :
+ *
+ * @return False on failure or True on success
+ */
+static bool check_crc(const uint8_t *data, uint16_t count, uint8_t checksum);
+
 /* Exported functions definitions --------------------------------------------*/
 /**
  * @brief Function that initializes a SGP41 instance
  */
-esp_err_t sgp41_init(sgp41_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr,
-		i2c_bus_read_t read, i2c_bus_write_t write) {
+esp_err_t sgp41_init(sgp41_t *const me, i2c_master_bus_handle_t i2c_bus_handle,
+		uint8_t dev_addr) {
 	/* Print initializing message */
 	ESP_LOGI(TAG, "Initializing instance...");
 
 	/* Variable to return error code */
 	esp_err_t ret = ESP_OK;
 
-	/* Add device to bus */
-	ret = i2c_bus_add_dev(i2c_bus, dev_addr, "sgp41", NULL, NULL);
+	/* Add device to I2C bus */
+	i2c_device_config_t i2c_dev_conf = {
+			.scl_speed_hz = 400000,
+			.device_address = dev_addr
+	};
 
-	if (ret != ESP_OK) {
-		ESP_LOGE(TAG, "Failed to add device");
+	if (i2c_master_bus_add_device(i2c_bus_handle, &i2c_dev_conf, &me->i2c_dev) != ESP_OK) {
+		ESP_LOGE(TAG, "Failed to add device to I2C bus");
 		return ret;
 	}
-
-	/**/
-	me->i2c_dev = &i2c_bus->devs.dev[i2c_bus->devs.num - 1]; /* todo: write function to get the dev from name */
 
 	/* Execute selff test */
 	ESP_LOGI(TAG, "Executing self test...");
@@ -130,9 +141,10 @@ esp_err_t sgp41_init(sgp41_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr,
 	}
 
 	/* Get and print serial number */
-	sgp41_get_serial_number(me, me->serial_number);
-	ESP_LOGI(TAG, "Serial number: 0X%04X%04X%04X\n", me->serial_number[0],
-			me->serial_number[1], me->serial_number[2]);
+	uint16_t serial_number[3];
+	sgp41_get_serial_number(me, serial_number);
+	ESP_LOGI(TAG, "Serial number: 0X%04X%04X%04X\n",
+			serial_number[0], serial_number[1], serial_number[2]);
 
 	/* Print successful initialization message */
 	ESP_LOGI(TAG, "Instance initialized successfully");
@@ -173,7 +185,12 @@ esp_err_t sgp41_execute_conditioning(sgp41_t *const me, uint16_t default_rh,
 		return ESP_FAIL;
 	}
 
-	/* todo: check crc */
+	/* Check data received CRC */
+	for (uint8_t i = 0; i < 3; i += 3) {
+		if (!check_crc(&data_rx[i], 2, data_rx[i + 2])) {
+			return ESP_FAIL;
+		}
+	}
 
 	*sraw_voc = (uint16_t)((data_rx[0] << 8) | (data_rx[1]));
 
@@ -211,7 +228,12 @@ esp_err_t sgp41_measure_raw_signals(sgp41_t *const me, uint16_t relative_humidit
 		return ESP_FAIL;
 	}
 
-	/* todo: check crc */
+	/* Check data received CRC */
+	for (uint8_t i = 0; i < 6; i += 3) {
+		if (!check_crc(&data_rx[i], 2, data_rx[i + 2])) {
+			return ESP_FAIL;
+		}
+	}
 
 	*sraw_voc = (uint16_t)((data_rx[0] << 8) | (data_rx[1]));
 	*sraw_nox = (uint16_t)((data_rx[3] << 8) | (data_rx[4]));
@@ -242,7 +264,12 @@ esp_err_t sgp41_execute_self_test(sgp41_t *const me, uint16_t *test_result) {
 		return ESP_FAIL;
 	}
 
-	/* todo: check crc */
+	/* Check data received CRC */
+	for (uint8_t i = 0; i < 3; i += 3) {
+		if (!check_crc(&data_rx[i], 2, data_rx[i + 2])) {
+			return ESP_FAIL;
+		}
+	}
 
 	*test_result = (uint16_t)((data_rx[0] << 8) | (data_rx[1]));
 
@@ -290,7 +317,12 @@ esp_err_t sgp41_get_serial_number(sgp41_t *const me, uint16_t *serial_number) {
 		return ESP_FAIL;
 	}
 
-	/* todo: check crc */
+	/* Check data received CRC */
+	for (uint8_t i = 0; i < 9; i += 3) {
+		if (!check_crc(&data_rx[i], 2, data_rx[i + 2])) {
+			return ESP_FAIL;
+		}
+	}
 
 	serial_number[0] = (uint16_t)((data_rx[0] << 8) | (data_rx[1]));
 	serial_number[1] = (uint16_t)((data_rx[3] << 8) | (data_rx[4]));
@@ -306,12 +338,13 @@ esp_err_t sgp41_get_serial_number(sgp41_t *const me, uint16_t *serial_number) {
  */
 static int8_t i2c_read(uint16_t reg_addr, uint8_t *reg_data, uint32_t data_len,
 		                   void *intf) {
-	i2c_bus_dev_t *dev = (i2c_bus_dev_t *)intf;
+	i2c_master_dev_handle_t i2c_dev = (i2c_master_dev_handle_t)intf;
 
-	uint8_t reg[2] = {(uint8_t)((reg_addr & 0xFF00 ) >> 8),
-			              (uint8_t)(reg_addr & 0x00FF)};
+	if (i2c_master_receive(i2c_dev, reg_data, data_len, -1) != ESP_OK) {
+		return -1;
+	}
 
-	return dev->read(reg_addr ? reg : NULL, reg_addr ? 2 : 0, reg_data, data_len, intf);
+	return 0;
 }
 
 /**
@@ -319,12 +352,27 @@ static int8_t i2c_read(uint16_t reg_addr, uint8_t *reg_data, uint32_t data_len,
  */
 static int8_t i2c_write(uint16_t reg_addr, const uint8_t *reg_data,
 		                    uint32_t data_len, void *intf) {
-	i2c_bus_dev_t *dev = (i2c_bus_dev_t *)intf;
+	i2c_master_dev_handle_t i2c_dev = (i2c_master_dev_handle_t)intf;
 
-	uint8_t reg[2] = {(uint8_t)((reg_addr & 0xFF00 ) >> 8),
-			(uint8_t)(reg_addr & 0x00FF)};
+	uint8_t buffer[SGP41_I2C_BUFFER_LEN_MAX] = {0};
+	uint8_t addr_len = sizeof(reg_addr);
 
-	return dev->write(reg, 2, reg_data, data_len, intf);
+	/* Copy the register address to buffer */
+	for (uint8_t i = 0; i < addr_len; i++) {
+		buffer[i] = (reg_addr & (0xFF << ((addr_len - 1 - i) * 8))) >> ((addr_len - 1 - i) * 8);
+	}
+
+	/* Copy the data to buffer */
+	for (uint8_t i = 0; i < data_len; i++) {
+		buffer[i + addr_len] = reg_data[i];
+	}
+
+	/* Transmit buffer */
+	if (i2c_master_transmit(i2c_dev, buffer, addr_len + data_len, -1) != ESP_OK) {
+		return -1;
+	}
+
+	return 0;
 }
 
 /**
@@ -370,6 +418,17 @@ static uint8_t generate_crc(const uint8_t *data, uint16_t count) {
   	}
   }
   return crc;
+}
+
+/**
+ * @brief Function that checks the CRC for the received data
+ */
+static bool check_crc(const uint8_t *data, uint16_t count, uint8_t checksum) {
+	if (generate_crc(data, count) != checksum) {
+		return false;
+	}
+
+	return true;
 }
 
 /***************************** END OF FILE ************************************/

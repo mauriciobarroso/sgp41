@@ -46,10 +46,11 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "i2c_bus.h"
+#include "driver/i2c_master.h"
 
 /* Exported Macros -----------------------------------------------------------*/
-#define SGP41_I2C_ADDR	0x59
+#define SGP41_I2C_ADDR						0x59
+#define SGP41_I2C_BUFFER_LEN_MAX	8
 
 /* SGP41 commands */
 #define SPG41_EXECUTE_CONDITIONING_CMD	0x2612
@@ -60,8 +61,7 @@ extern "C" {
 
 /* Exported typedef ----------------------------------------------------------*/
 typedef struct {
-	i2c_bus_dev_t *i2c_dev;
-	uint16_t serial_number[3];
+	i2c_master_dev_handle_t i2c_dev;					/*!< I2C device handle */
 } sgp41_t;
 
 /* Exported variables --------------------------------------------------------*/
@@ -74,13 +74,11 @@ typedef struct {
  * @param i2c_bus  : Pointer to a structure with the data to initialize the
  * 								   I2C device
  * @param dev_addr : I2C device address
- * @param read     : Pointer to I2C read function
- * @param write    : Pointer to I2C write function
  *
  * @return ESP_OK on success
  */
-esp_err_t sgp41_init(sgp41_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr,
-		i2c_bus_read_t read, i2c_bus_write_t write);
+esp_err_t sgp41_init(sgp41_t *const me, i2c_master_bus_handle_t i2c_bus_handle,
+		uint8_t dev_addr);
 
 /**
  * @brief Function that starts the conditioning, i.e., the VOC pixel will be
